@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useState } from "react";
+import React, { useEffect, useReducer, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -115,12 +115,20 @@ function uid() {
   return crypto.randomUUID?.() ?? String(Date.now() + Math.random());
 }
 
+function toNumber(value) {
+  return globalThis.Number(value);
+}
+
+function isFiniteNumber(value) {
+  return globalThis.Number.isFinite(value);
+}
+
 function clamp(value, min = 1, max = 6) {
-  return Math.max(min, Math.min(max, Number(value)));
+  return Math.max(min, Math.min(max, toNumber(value)));
 }
 
 function format(value) {
-  return Number.isFinite(value) ? value.toFixed(1).replace(".", ",") : "--";
+  return isFiniteNumber(value) ? value.toFixed(1).replace(".", ",") : "--";
 }
 
 function average(grades, weights) {
@@ -130,6 +138,7 @@ function average(grades, weights) {
     const meta = gradeTypes[grade.type] ?? gradeTypes.schulaufgabe;
     buckets[meta.bucket].push({ ...grade, weight: meta.weight });
   });
+
   const parts = Object.entries(buckets)
     .map(([bucket, list]) => {
       if (!list.length) return null;
@@ -141,6 +150,7 @@ function average(grades, weights) {
       };
     })
     .filter(Boolean);
+
   const activeWeight = parts.reduce((sum, part) => sum + part.weight, 0);
   return parts.reduce((sum, part) => sum + part.value * (part.weight / activeWeight), 0);
 }
@@ -154,12 +164,12 @@ function withNext(subject, value, type = "schulaufgabe") {
 }
 
 function overall(subjects) {
-  const values = subjects.map(subjectAverage).filter(Number.isFinite);
+  const values = subjects.map(subjectAverage).filter(isFiniteNumber);
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function tone(value) {
-  if (!Number.isFinite(value)) return "neutral";
+  if (!isFiniteNumber(value)) return "neutral";
   if (value <= 2.4) return "good";
   if (value < 3.6) return "neutral";
   if (value < 4.6) return "warning";
@@ -179,11 +189,21 @@ function trend(subject) {
 }
 
 function targetPlan(subject, target = subject.target, count = 1) {
-  const future = (value) => Array.from({ length: count }, (_, i) => ({ id: `f-${i}`, value, type: "schulaufgabe", date: "2026-07-01" }));
+  const future = (value) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `f-${index}`,
+      value,
+      type: "schulaufgabe",
+      date: "2026-07-01",
+    }));
   const best = average([...subject.grades, ...future(1)], subject.weights);
   const worst = average([...subject.grades, ...future(6)], subject.weights);
-  if (best > target) return { status: "impossible", required: 1, message: `Selbst mit einer 1 bleibt ${format(best)}.` };
-  if (worst <= target) return { status: "safe", required: 6, message: "Das Ziel ist aktuell abgesichert." };
+  if (best > target) {
+    return { status: "impossible", required: 1, message: `Selbst mit einer 1 bleibt ${format(best)}.` };
+  }
+  if (worst <= target) {
+    return { status: "safe", required: 6, message: "Das Ziel ist aktuell abgesichert." };
+  }
   let low = 1;
   let high = 6;
   for (let i = 0; i < 28; i += 1) {
@@ -197,8 +217,7 @@ function targetPlan(subject, target = subject.target, count = 1) {
 
 function forecast(subject) {
   const current = subjectAverage(subject) ?? 3;
-  const trendValue = trend(subject).score;
-  const realisticGrade = clamp(current - trendValue);
+  const realisticGrade = clamp(current - trend(subject).score);
   const future = (value) => [
     { id: "fw", value, type: "schulaufgabe", date: "2026-06-30" },
     { id: "fk", value, type: "kurzarbeit", date: "2026-07-10" },
@@ -214,7 +233,15 @@ function forecast(subject) {
 function risk(subject) {
   const avg = subjectAverage(subject);
   const plan = targetPlan(subject);
-  return Math.min(100, Math.round(Math.max(0, avg - 2.2) * 18 + (avg >= 4 ? 28 : 0) + (plan.status === "impossible" ? 32 : 0) + (plan.required <= 2.2 ? 16 : 0)));
+  return Math.min(
+    100,
+    Math.round(
+      Math.max(0, avg - 2.2) * 18 +
+        (avg >= 4 ? 28 : 0) +
+        (plan.status === "impossible" ? 32 : 0) +
+        (plan.required <= 2.2 ? 16 : 0),
+    ),
+  );
 }
 
 export default function App() {
@@ -257,11 +284,19 @@ function Login({ mode, setMode, onLogin }) {
   const [password, setPassword] = useState("notenpilot");
   const [classLevel, setClassLevel] = useState("10");
   const [error, setError] = useState("");
+
   function submit(event) {
     event.preventDefault();
-    if (!email.trim() || !password.trim()) return setError("Bitte E-Mail und Passwort eingeben.");
-    onLogin({ name: email.split("@")[0].replace(/[._-]/g, " ") || "Demo", classLevel });
+    if (!email.trim() || !password.trim()) {
+      setError("Bitte E-Mail und Passwort eingeben.");
+      return;
+    }
+    onLogin({
+      name: email.split("@")[0].replace(/[._-]/g, " ") || "Demo",
+      classLevel,
+    });
   }
+
   return (
     <div className="login-shell">
       <header className="login-bar">
@@ -273,14 +308,25 @@ function Login({ mode, setMode, onLogin }) {
           <p className="eyebrow">Secure Grade Banking</p>
           <h1>Dein Noten-Cockpit ist gesichert.</h1>
           <p>GradePilot kombiniert Zielnoten, Risikoanalyse und Zeugnisprognosen in einer Oberfläche, die sich wie Banking für Noten anfühlt.</p>
-          <div className="ledger"><Metric label="Session" value="Memory" /><Metric label="Daten" value="Demo" /><Metric label="Modus" value={mode} /></div>
+          <div className="ledger">
+            <Metric label="Session" value="Memory" />
+            <Metric label="Daten" value="Demo" />
+            <Metric label="Modus" value={mode} />
+          </div>
         </section>
         <form className="login-card" onSubmit={submit}>
           <div className="lock">●</div>
           <h2>Einloggen</h2>
-          <label>E-Mail<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-          <label>Passwort<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-          <label>Klassenstufe<select value={classLevel} onChange={(e) => setClassLevel(e.target.value)}>{Array.from({ length: 9 }, (_, i) => i + 5).map((grade) => <option key={grade}> {grade}</option>)}</select></label>
+          <label>E-Mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+          <label>Passwort<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <label>
+            Klassenstufe
+            <select value={classLevel} onChange={(event) => setClassLevel(event.target.value)}>
+              {Array.from({ length: 9 }, (_, index) => String(index + 5)).map((grade) => (
+                <option key={grade} value={grade}>Klasse {grade}</option>
+              ))}
+            </select>
+          </label>
           {error && <p className="error">{error}</p>}
           <button className="primary">Sicher einloggen</button>
           <button type="button" className="secondary" onClick={() => onLogin({ name: "Demo Nutzer", classLevel: "10" })}>Demo-Konto öffnen</button>
@@ -312,14 +358,63 @@ function ThemeButton({ mode, setMode }) {
 }
 
 function Dashboard({ subjects, go, select }) {
-  const critical = subjects.filter((subject) => subjectAverage(subject) >= 4 || targetPlan(subject).status === "impossible").sort((a, b) => risk(b) - risk(a));
+  const critical = subjects
+    .filter((subject) => subjectAverage(subject) >= 4 || targetPlan(subject).status === "impossible")
+    .sort((a, b) => risk(b) - risk(a));
   const worst = critical[0] ?? subjects[0];
   const plan = targetPlan(worst, worst.target, 2);
+
   return (
     <div className="stack">
-      <section className="hero panel"><div><p className="eyebrow">Gesamtschnitt live</p><Number value={overall(subjects)} className="hero-number" /><p>Gewichtete Durchschnitte, Zielstatus und Warnungen auf einen Blick.</p></div><div className="terminal"><Metric label="Fächer" value={subjects.length} /><Metric label="Kritisch" value={critical.length} /><Metric label="Ziel sicher" value={subjects.length - critical.length} /></div></section>
-      <section className="grid two"><div><Title over="Portfolio" text="Fächerübersicht" /><div className="cards">{subjects.map((subject) => <button className="subject-card" key={subject.id} onClick={() => { select(subject.id); go("subjects"); }}><div><span className="dot" style={{ background: subject.color }} />{subject.name}<Trend subject={subject} /></div><Number value={subjectAverage(subject)} className={tone(subjectAverage(subject))} /><small>{targetPlan(subject).message}</small></button>)}</div></div><div><Warning critical={critical} subjects={subjects} /><Heatmap subjects={subjects} /></div></section>
-      <section className="grid two"><div className="panel"><Title over="Nächste Arbeit" text="Was steht an?" />{subjects.slice(0, 3).map((subject) => <div className="row" key={subject.id}><span>{subject.name}<small>{subject.next.title} · {subject.next.date}</small></span><b>{subject.next.impact}</b></div>)}</div><div className="widget panel"><Title over="Widget" text="iOS Vorschau" /><Number value={overall(subjects)} className="widget-number" /><p>Kritisch: {worst.name}</p><b>Benötigt: {format(plan.required)}</b></div></section>
+      <section className="hero panel">
+        <div>
+          <p className="eyebrow">Gesamtschnitt live</p>
+          <GradeValue value={overall(subjects)} className="hero-number" />
+          <p>Gewichtete Durchschnitte, Zielstatus und Warnungen auf einen Blick.</p>
+        </div>
+        <div className="terminal">
+          <Metric label="Fächer" value={subjects.length} />
+          <Metric label="Kritisch" value={critical.length} />
+          <Metric label="Ziel sicher" value={subjects.length - critical.length} />
+        </div>
+      </section>
+
+      <section className="grid two">
+        <div>
+          <Title over="Portfolio" text="Fächerübersicht" />
+          <div className="cards">
+            {subjects.map((subject) => (
+              <button className="subject-card" key={subject.id} onClick={() => { select(subject.id); go("subjects"); }}>
+                <div><span className="dot" style={{ background: subject.color }} />{subject.name}<Trend subject={subject} /></div>
+                <GradeValue value={subjectAverage(subject)} className={tone(subjectAverage(subject))} />
+                <small>{targetPlan(subject).message}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <Warning critical={critical} subjects={subjects} />
+          <Heatmap subjects={subjects} />
+        </div>
+      </section>
+
+      <section className="grid two">
+        <div className="panel">
+          <Title over="Nächste Arbeit" text="Was steht an?" />
+          {subjects.slice(0, 3).map((subject) => (
+            <div className="row" key={subject.id}>
+              <span>{subject.name}<small>{subject.next.title} · {subject.next.date}</small></span>
+              <b>{subject.next.impact}</b>
+            </div>
+          ))}
+        </div>
+        <div className="widget panel">
+          <Title over="Widget" text="iOS Vorschau" />
+          <GradeValue value={overall(subjects)} className="widget-number" />
+          <p>Kritisch: {worst.name}</p>
+          <b>Benötigt: {format(plan.required)}</b>
+        </div>
+      </section>
     </div>
   );
 }
@@ -329,14 +424,74 @@ function Subjects({ subjects, selected, select, dispatch }) {
   const [type, setType] = useState("schulaufgabe");
   const [name, setName] = useState("");
   const chartData = selected.grades.map((entry, index) => ({ name: index + 1, note: entry.value }));
+
   return (
-    <div className="grid subjects-layout"><aside className="panel"><Title over="Fächer" text="Auswählen" />{subjects.map((subject) => <button key={subject.id} className={`select-row ${subject.id === selected.id ? "active" : ""}`} onClick={() => select(subject.id)}><span>{subject.name}</span><Number value={subjectAverage(subject)} /></button>)}<form onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; const written = 0.6; dispatch({ type: "add-subject", subject: { id: uid(), name, color: colors[subjects.length % colors.length], target: 3, weights: { written, oral: 1 - written }, next: { title: "Schulaufgabe", date: "2026-07-01", impact: "mittel" }, grades: [] } }); setName(""); }}><label>Neues Fach<input value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. Chemie" /></label><button className="primary">Fach anlegen</button></form></aside><section className="stack"><div className="detail panel"><div><p className="eyebrow">Aktives Fach</p><h2>{selected.name}</h2></div><Number value={subjectAverage(selected)} className={`big ${tone(subjectAverage(selected))}`} /></div><form className="panel form" onSubmit={(e) => { e.preventDefault(); dispatch({ type: "add-grade", subjectId: selected.id, grade: { id: uid(), value: clamp(grade), type, date: new Date().toISOString().slice(0, 10) } }); }}><label>Note<input type="number" min="1" max="6" step="0.1" value={grade} onChange={(e) => setGrade(e.target.value)} /></label><label>Typ<select value={type} onChange={(e) => setType(e.target.value)}>{Object.entries(gradeTypes).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}</select></label><button className="primary">Note speichern</button></form><Target selected={selected} dispatch={dispatch} /><Chart data={chartData} color={selected.color} /></section></div>
+    <div className="grid subjects-layout">
+      <aside className="panel">
+        <Title over="Fächer" text="Auswählen" />
+        {subjects.map((subject) => (
+          <button key={subject.id} className={`select-row ${subject.id === selected.id ? "active" : ""}`} onClick={() => select(subject.id)}>
+            <span>{subject.name}</span>
+            <GradeValue value={subjectAverage(subject)} />
+          </button>
+        ))}
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (!name.trim()) return;
+          const written = 0.6;
+          dispatch({
+            type: "add-subject",
+            subject: {
+              id: uid(),
+              name,
+              color: colors[subjects.length % colors.length],
+              target: 3,
+              weights: { written, oral: 1 - written },
+              next: { title: "Schulaufgabe", date: "2026-07-01", impact: "mittel" },
+              grades: [],
+            },
+          });
+          setName("");
+        }}>
+          <label>Neues Fach<input value={name} onChange={(event) => setName(event.target.value)} placeholder="z.B. Chemie" /></label>
+          <button className="primary">Fach anlegen</button>
+        </form>
+      </aside>
+      <section className="stack">
+        <div className="detail panel">
+          <div><p className="eyebrow">Aktives Fach</p><h2>{selected.name}</h2></div>
+          <GradeValue value={subjectAverage(selected)} className={`big ${tone(subjectAverage(selected))}`} />
+        </div>
+        <form className="panel form" onSubmit={(event) => {
+          event.preventDefault();
+          dispatch({
+            type: "add-grade",
+            subjectId: selected.id,
+            grade: { id: uid(), value: clamp(grade), type, date: new Date().toISOString().slice(0, 10) },
+          });
+        }}>
+          <label>Note<input type="number" min="1" max="6" step="0.1" value={grade} onChange={(event) => setGrade(event.target.value)} /></label>
+          <label>Typ<select value={type} onChange={(event) => setType(event.target.value)}>{Object.entries(gradeTypes).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}</select></label>
+          <button className="primary">Note speichern</button>
+        </form>
+        <Target selected={selected} dispatch={dispatch} />
+        <Chart data={chartData} color={selected.color} />
+      </section>
+    </div>
   );
 }
 
 function Target({ selected, dispatch }) {
   const plan = targetPlan(selected);
-  return <div className="panel"><Title over="Zielnote" text="Was ist nötig?" /><select value={selected.target} onChange={(e) => dispatch({ type: "target", subjectId: selected.id, target: Number(e.target.value) })}>{[1,2,3,4,5,6].map((grade) => <option key={grade} value={grade}>Ich will eine {grade}</option>)}</select><div className={`result ${plan.status}`}>{plan.status === "safe" ? "Ziel sicher" : `${format(plan.required)} nötig`}<small>{plan.message}</small></div></div>;
+  return (
+    <div className="panel">
+      <Title over="Zielnote" text="Was ist nötig?" />
+      <select value={selected.target} onChange={(event) => dispatch({ type: "target", subjectId: selected.id, target: toNumber(event.target.value) })}>
+        {[1, 2, 3, 4, 5, 6].map((grade) => <option key={grade} value={grade}>Ich will eine {grade}</option>)}
+      </select>
+      <div className={`result ${plan.status}`}>{plan.status === "safe" ? "Ziel sicher" : `${format(plan.required)} nötig`}<small>{plan.message}</small></div>
+    </div>
+  );
 }
 
 function Simulator({ subjects, selected, select }) {
@@ -344,27 +499,92 @@ function Simulator({ subjects, selected, select }) {
   const current = subjectAverage(selected);
   const simulated = withNext(selected, next);
   const delta = current - simulated;
-  return <div className="grid two"><section className="panel"><Title over="Simulator" text="Nächste Note" /><label>Fach<select value={selected.id} onChange={(e) => select(e.target.value)}>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label><label>Note {format(Number(next))}<input type="range" min="1" max="6" step="0.1" value={next} onChange={(e) => setNext(Number(e.target.value))} /></label><div className="ledger"><Metric label="Aktuell" value={format(current)} /><Metric label="Danach" value={format(simulated)} /><Metric label="Delta" value={`${delta >= 0 ? "+" : "-"}${format(Math.abs(delta))}`} /></div></section><section className="panel"><Title over={selected.name} text="Live-Vorschau" /><Chart data={[...selected.grades.map((g, i) => ({ name: i + 1, note: g.value })), { name: "next", note: Number(next) }]} color="var(--accent)" /></section></div>;
+  return (
+    <div className="grid two">
+      <section className="panel">
+        <Title over="Simulator" text="Nächste Note" />
+        <label>Fach<select value={selected.id} onChange={(event) => select(event.target.value)}>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+        <label>Note {format(toNumber(next))}<input type="range" min="1" max="6" step="0.1" value={next} onChange={(event) => setNext(toNumber(event.target.value))} /></label>
+        <div className="ledger">
+          <Metric label="Aktuell" value={format(current)} />
+          <Metric label="Danach" value={format(simulated)} />
+          <Metric label="Delta" value={`${delta >= 0 ? "+" : "-"}${format(Math.abs(delta))}`} />
+        </div>
+      </section>
+      <section className="panel">
+        <Title over={selected.name} text="Live-Vorschau" />
+        <Chart data={[...selected.grades.map((gradeItem, index) => ({ name: index + 1, note: gradeItem.value })), { name: "next", note: toNumber(next) }]} color="var(--accent)" />
+      </section>
+    </div>
+  );
 }
 
 function Forecast({ subjects }) {
   const data = subjects.map((subject) => ({ name: subject.name, color: subject.color, ...forecast(subject) }));
-  return <div className="stack"><Title over="Zeugnisprognose" text="Best Case bis Worst Case" /><div className="forecast-grid">{data.map((item) => <div className="panel" key={item.name}><div className="row"><b>{item.name}</b><Number value={item.realistic} className={tone(item.realistic)} /></div><Range item={item} /></div>)}</div><div className="panel"><ResponsiveContainer width="100%" height={330}><BarChart data={data} layout="vertical" margin={{ left: 30, right: 20 }}><CartesianGrid stroke="var(--grid)" strokeDasharray="3 8" /><XAxis type="number" domain={[1, 6]} reversed /><YAxis type="category" dataKey="name" /><Tooltip /><Bar dataKey="realistic" radius={6}>{data.map((item) => <Cell key={item.name} fill={item.color} />)}</Bar></BarChart></ResponsiveContainer></div></div>;
+  return (
+    <div className="stack">
+      <Title over="Zeugnisprognose" text="Best Case bis Worst Case" />
+      <div className="forecast-grid">
+        {data.map((item) => (
+          <div className="panel" key={item.name}>
+            <div className="row"><b>{item.name}</b><GradeValue value={item.realistic} className={tone(item.realistic)} /></div>
+            <Range item={item} />
+          </div>
+        ))}
+      </div>
+      <div className="panel">
+        <ResponsiveContainer width="100%" height={330}>
+          <BarChart data={data} layout="vertical" margin={{ left: 30, right: 20 }}>
+            <CartesianGrid stroke="var(--grid)" strokeDasharray="3 8" />
+            <XAxis type="number" domain={[1, 6]} reversed />
+            <YAxis type="category" dataKey="name" />
+            <Tooltip />
+            <Bar dataKey="realistic" radius={6}>{data.map((item) => <Cell key={item.name} fill={item.color} />)}</Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 }
 
 function Chart({ data, color }) {
   if (!data.length) return <div className="empty">Noch keine Noten. Trage die erste Leistung ein.</div>;
-  return <div className="panel chart"><ResponsiveContainer width="100%" height={260}><LineChart data={data}><CartesianGrid stroke="var(--grid)" strokeDasharray="3 8" /><XAxis dataKey="name" /><YAxis domain={[1, 6]} reversed /><Tooltip /><Line type="monotone" dataKey="note" stroke={color} strokeWidth={3} dot={{ r: 5 }} /></LineChart></ResponsiveContainer></div>;
+  return (
+    <div className="panel chart">
+      <ResponsiveContainer width="100%" height={260}>
+        <LineChart data={data}>
+          <CartesianGrid stroke="var(--grid)" strokeDasharray="3 8" />
+          <XAxis dataKey="name" />
+          <YAxis domain={[1, 6]} reversed />
+          <Tooltip />
+          <Line type="monotone" dataKey="note" stroke={color} strokeWidth={3} dot={{ r: 5 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 function Warning({ critical, subjects }) {
   const top = critical[0] ?? subjects[0];
   const plan = targetPlan(top, top.target, 2);
-  return <div className={`panel warning-box ${critical.length ? "alert" : ""}`}><Title over="Risk Engine" text="Kritische Fächer" />{critical.length ? critical.slice(0, 3).map((subject) => <div className="row" key={subject.id}><span>{subject.name}</span><Number value={subjectAverage(subject)} /></div>) : <p>Keine akute Warnung.</p>}<p>In {top.name} brauchst du in den nächsten 2 Arbeiten mindestens eine {Math.max(1, Math.floor(plan.required))}, um noch eine {top.target} zu erreichen.</p></div>;
+  return (
+    <div className={`panel warning-box ${critical.length ? "alert" : ""}`}>
+      <Title over="Risk Engine" text="Kritische Fächer" />
+      {critical.length ? critical.slice(0, 3).map((subject) => <div className="row" key={subject.id}><span>{subject.name}</span><GradeValue value={subjectAverage(subject)} /></div>) : <p>Keine akute Warnung.</p>}
+      <p>In {top.name} brauchst du in den nächsten 2 Arbeiten mindestens eine {Math.max(1, Math.floor(plan.required))}, um noch eine {top.target} zu erreichen.</p>
+    </div>
+  );
 }
 
 function Heatmap({ subjects }) {
-  return <div className="heatmap">{subjects.map((subject) => <div className="heat" key={subject.id} style={{ "--risk": `${risk(subject)}%`, "--heat": risk(subject) > 70 ? "var(--critical)" : risk(subject) > 42 ? "var(--warning)" : "var(--good)" }}><span>{subject.name}</span><b>{risk(subject)}</b></div>)}</div>;
+  return (
+    <div className="heatmap">
+      {subjects.map((subject) => {
+        const score = risk(subject);
+        return <div className="heat" key={subject.id} style={{ "--risk": `${score}%`, "--heat": score > 70 ? "var(--critical)" : score > 42 ? "var(--warning)" : "var(--good)" }}><span>{subject.name}</span><b>{score}</b></div>;
+      })}
+    </div>
+  );
 }
 
 function Range({ item }) {
@@ -378,7 +598,7 @@ function Metric({ label, value }) {
   return <div className="metric"><span>{label}</span><b>{value}</b></div>;
 }
 
-function Number({ value, className = "" }) {
+function GradeValue({ value, className = "" }) {
   return <b className={`num ${className}`}>{typeof value === "number" ? format(value) : value}</b>;
 }
 
